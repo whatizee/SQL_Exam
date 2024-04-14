@@ -1,0 +1,632 @@
+Week_8_1
+
+--solar and non solar households
+SELECT zcta5, longitude,
+       (CASE WHEN hhfsolar = 0 THEN latitude END) as nosolarlat,
+       (CASE WHEN hhfsolar > 0 THEN latitude END) as solarlat
+FROM ZipCensus
+WHERE latitude BETWEEN 20 and 50 AND
+Longitude Between -135 and -65
+
+SELECT TOP 10 stab, COUNT(*) as numzips, SUM(tothhs) as NumHHs,
+       SUM(CASE WHEN hhfsolar > 0 THEN 1.0 END)/COUNT(*) as propzips,
+       SUM(hhfsolar * 1.0) / SUM(tothhs)as prophhu
+FROM ZipCensus zc
+GROUP BY stab
+ORDER BY prophhu DESC
+
+
+Week_8_2
+
+USE SQLBook
+--Find distance between 
+
+SELECT zc.*, latitude - 39.8 as difflat, longitude - (-98.6) as difflong,latitude*PI()/180 as latrad, 39.8*PI()/180 as centerlatrad
+    FROM zipcensus zc
+
+--Top 10 Nearest Zipcodes of (39.8, -98.96)
+
+SELECT TOP 10 zcta5, stab, totpop, latitude, longitude, disteuc
+    FROM (SELECT zc.*,
+            (CASE WHEN latitude > 39.8
+                THEN SQRT(SQUARE(difflat*69) + SQUARE(difflong*COS(latrad)*69))
+                ELSE SQRT(SQUARE(difflat*69) + SQUARE(difflong*COS(centerlatrad)*69))
+            END) as disteuc
+            FROM (SELECT zc.*, latitude - 39.8 as difflat, longitude - (-98.6) as difflong,RADIANS(latitude) as latrad, RADIANS(39.8) as centerlatrad
+                  FROM zipcensus zc)zc)zc
+ORDER BY disteuc
+
+
+-- Accurate method using  arc cosine calculation - Haversine formula for calculating the great-circle distance between two points on the Earth's surface
+
+SELECT TOP 10 zcta5, stab, totpop, latitude, longitude, disteuc, distcirc
+    FROM (SELECT zc.*,
+            (CASE WHEN latitude > 39.8
+                THEN SQRT(SQUARE(difflat*69) + SQUARE(difflong*COS(latrad)*69))
+                ELSE SQRT(SQUARE(difflat*69) + SQUARE(difflong*COS(centerlatrad)*69))
+            END) as disteuc,
+           ACOS(COS(centerlatrad)*COS(latrad)*COS(centerlongrad - longrad) +
+                SIN(centerlatrad)*SIN(latrad))*radius as distcirc --Haversine formula
+           FROM (SELECT zc.*, latitude - 39.8 as difflat, longitude - (-98.6) as difflong,RADIANS(latitude) as latrad, RADIANS(39.8) as centerlatrad, 
+                    RADIANS(longitude) as longrad,RADIANS(-98.6) as centerlongrad,3949.9 as radius
+                    FROM zipcensus zc)zc)zc
+ORDER BY disteuc
+
+Week_9
+
+
+--Get the number of orders in each zip code 
+SELECT ZipCode, COUNT(*) as numords                    
+      FROM Orders                    
+      GROUP BY ZipCode
+
+-- use the results of above query as inner query and map number of orders in each zip code with its lat, lon colums in Zipcensus using join 
+SELECT zc.zcta5, longitude, latitude, numords                
+FROM ZipCensus zc JOIN                    
+     (SELECT ZipCode, COUNT(*) as numords                    
+      FROM Orders                    
+      GROUP BY ZipCode) o                    
+     ON zc.zcta5 = o.zipcode                    
+WHERE latitude BETWEEN 20 and 50 AND                    
+      longitude BETWEEN -135 AND -65    
+
+-- Top 10 wealther Zipcode based on Median household income
+SELECT TOP 20 zcta5, medianhhinc
+FROM ZipCensus
+ORDER BY medianhhinc DESC
+
+-- Top 10 wealther Zipcode based on Median household income
+SELECT TOP 10 zcta5, medianhhinc
+FROM ZipCensus
+ORDER BY medianhhinc
+
+
+--How many Zipcodes have highest Median household income "250001"
+
+SELECT medianhhinc, COUNT(*) as numzips                        
+FROM ZipCensus zc JOIN                        
+     (SELECT MAX(medianhhinc) as hhmax, MIN(medianhhinc) as hhmin 
+     FROM ZipCensus ) minmax                        
+     ON zc.medianhhinc IN (minmax.hhmax, minmax.hhmin)            
+     GROUP BY medianhhinc    
+
+-- Get the zip code details of the Median Fam Incom and comapre with the Median Household Income 
+SELECT zc.zcta5, zc.state, zc.zipname, zc.TotPop, zc.TotHHs, zc.Families, zc.MedianHHInc, zc.MedianFamInc                    
+FROM ZipCensus zc                                 
+WHERE MedianHHInc = (SELECT MAX(MedianHHInc) FROM ZipCensus) 
+ORDER BY zcta5
+
+-- Max family income of HH whose family income is less than $10000 per year - Poorest
+-- Max family income of HH whose whose income exceeds $200,000 dollars per year - Wealthiest
+
+SELECT MAX(famhhinc200) as richest, MAX(famhhinc0) as poorest
+      FROM zipcensus
+      WHERE tothhs >= 1000
+
+-- Get the zip code details of Wealthiest & poorer using MAX(famhhinc200) , MAX(famhhinc0)
+SELECT zcta5, stab, medianhhinc, medianfaminc, totpop, tothhs, famhhinc200, famhhinc0
+FROM ZipCensus zc CROSS JOIN
+     (SELECT MAX(famhhinc200) as richest, MAX(famhhinc0) as poorest
+      FROM zipcensus
+      WHERE tothhs >= 1000) minmax
+WHERE (zc.famhhinc200 = richest OR zc.famhhinc0 = poorest)
+
+
+-- Comapre Zipcensus table vs Orders Table 
+
+SELECT COUNT(zcta5) FROM ZipCensus;
+
+SELECT COUNT(DISTINCT(ZipCode))  FROM Orders;
+
+SELECT COUNT(*) FROM (
+    SELECT zcta5 FROM ZipCensus
+    INTERSECT
+    SELECT ZipCode FROM Orders
+) AS CommonValues;
+
+-- Categorize the zipcodes to order placed  Vs no order and analyse count of Zipcodes , average households, Pub assistance HH % 
+-- College Pop %, Ownership%
+SELECT (CASE WHEN o.zipcode IS NULL THEN 'NO' ELSE 'YES' END) as hasorder,
+       COUNT(*) as cnt, AVG(tothhs*1.0) as avg_hh,
+       AVG(medianhhinc) as avg_medincome,
+       SUM(numhhpubassist*1.0) / SUM(tothhs) as hhpubassist,
+       SUM(bachelorsormore*1.0) / SUM(over25) as popcollege,
+       SUM(ownerocc*1.0) / SUM(tothhs) as hhowner
+FROM zipcensus zc LEFT OUTER JOIN
+     (SELECT DISTINCT ZipCode FROM Orders o) o
+     ON zc.zcta5 = o.ZipCode
+GROUP BY (CASE WHEN o.ZipCode IS NULL THEN 'NO' ELSE 'YES' END)
+ORDER BY hasorder
+
+
+--Household Median Income and Penetration by Zip Code
+
+SELECT zc.zcta5, medianhhinc,
+       (CASE WHEN o.numorders IS NULL THEN 0
+             ELSE o.numorders * 1.0/ zc.tothhs END) as pen
+FROM ZipCensus zc LEFT OUTER JOIN
+     (SELECT ZipCode, COUNT(*) as numorders
+      FROM Orders o
+      GROUP BY ZipCode) o
+     ON zc.zcta5 = o.ZipCode
+WHERE tothhs >= 1000
+
+-- Wealthiest Zip Code in a State and inequality
+SELECT zcta5, stab, longitude, Latitude, medianhhinc, totpop
+FROM (SELECT zc.*,
+             ROW_NUMBER() OVER (PARTITION BY stab ORDER BY medianhhinc DESC) as seqnum
+      FROM ZipCensus zc
+     ) zc
+WHERE seqnum = 1
+
+--Zip Codes with the Most Orders in Each State
+SELECT zc.zcta5, zc.stab as state, longitude, latitude, numorders                        
+FROM (SELECT Zipcode, State, COUNT(*) as numorders,                        
+             ROW_NUMBER() OVER (PARTITION BY state ORDER BY COUNT(*) DESC) as seqnum                        
+      FROM Orders                        
+      GROUP BY ZipCode, State                        
+     ) ozip JOIN                        
+     ZipCensus zc                        
+     ON zc.zcta5 = ozip.ZipCode                        
+WHERE seqnum = 1 AND                        
+      latitude BETWEEN 20 and 50 AND longitude BETWEEN -135 AND -65                        
+ORDER BY zc.stab                        
+
+
+Week_10_1 Time matters
+
+USE SQLBook
+
+-- Orders
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'Calendar';
+
+-- Orders
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'orders';
+
+-- OrderLines
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'orderlines';
+
+
+-- Checking for any expected value in Shipdate column
+SELECT (CASE WHEN ShipDate = CAST(ShipDate as DATE) 
+             THEN 'PURE' ELSE 'MIXED' END) as datetype,
+       COUNT(*) as num_OL_Records, MIN(OrderLineId) as MIN_OL_ID, MAX(OrderLineId) as MAX_OL_ID
+FROM OrderLines ol
+GROUP BY (CASE WHEN ShipDate = CAST(ShipDate as DATE) 
+               THEN 'PURE' ELSE 'MIXED' END)
+
+
+-- Count of orderlines by day
+SELECT shipdate, COUNT(*)
+FROM orderlines
+GROUP BY shipdate
+ORDER BY shipdate
+
+-- How many orderlines shipped each day and how many billed each day?
+
+SELECT s.ShipDate as thedate, s.numship, b.numbill
+FROM (SELECT ShipDate, COUNT(*) as numship
+      FROM OrderLines
+      GROUP BY ShipDate
+     ) s LEFT OUTER JOIN
+     (SELECT BillDate, COUNT(*) as numbill
+      FROM OrderLines
+      GROUP BY BillDate
+     ) b
+     ON s.ShipDate = b. BillDate
+ORDER BY thedate
+
+-- USING FULL OUTER JOIN
+SELECT COALESCE(s.ShipDate, b.BillDate) as thedate,                    
+       COALESCE(s.numship, 0) as numship, COALESCE(b.numbill, 0) as numbill                    
+FROM (SELECT ShipDate, COUNT(*) as numship                    
+      FROM OrderLines                    
+      GROUP BY ShipDate                    
+     ) s FULL OUTER JOIN                    
+     (SELECT BillDate, COUNT(*) as numbill                    
+      FROM OrderLines                    
+      GROUP BY BillDate                    
+     ) b                    
+     ON s.ShipDate = b. BillDate                    
+ORDER BY thedate                    
+
+-- Using UNION ALL
+SELECT thedate, SUM(isship) as numships, SUM(isbill) as numbills
+FROM ((SELECT ShipDate as thedate, 1 as isship, 0 as isbill
+       FROM OrderLines
+      ) UNION ALL
+      (SELECT BillDate as thedate, 0 as isship, 1 as isbill
+       FROM OrderLines)
+     ) bs
+GROUP BY thedate
+ORDER BY thedate
+
+
+--How many customers place orders in each month? 
+SELECT YEAR(OrderDate) as year, MONTH(OrderDate) as month,
+       COUNT(DISTINCT CustomerId) as numcustomers
+FROM Orders o
+GROUP BY YEAR(OrderDate), MONTH(OrderDate)
+ORDER BY year, month
+
+--How many customers place orders in each week?
+SELECT 
+    YEAR(OrderDate) AS year, 
+    DATEPART(week, OrderDate) AS week,
+    COUNT(DISTINCT CustomerId) AS numcustomers
+FROM Orders
+GROUP BY YEAR(OrderDate), DATEPART(week, OrderDate)
+ORDER BY year, week;
+
+-- Adding Day of the week
+SELECT 
+    YEAR(OrderDate) AS year, 
+    DATEPART(week, OrderDate) AS week,
+    DATENAME(weekday, OrderDate) AS day_of_week,
+    COUNT(DISTINCT CustomerId) AS numcustomers
+FROM Orders
+GROUP BY  YEAR(OrderDate), DATEPART(week, OrderDate), DATENAME(weekday, OrderDate)
+ORDER BY year, week;
+-- Count of Orders & Order Size 
+SELECT 
+    YEAR(OrderDate) as year, 
+    MONTH(OrderDate) as month,
+    COUNT(*) as numorders,
+    COUNT(DISTINCT CustomerId) as numcust, 
+    SUM(TotalPrice) as totspend,
+    SUM(TotalPrice)*1.0/COUNT(*) as avgordersize, 
+    SUM(TotalPrice)*1.0/COUNT(DISTINCT CustomerId) as avgcustorder 
+FROM Orders o
+GROUP BY YEAR(OrderDate), MONTH(OrderDate) 
+ORDER BY year, month
+
+-- Compare the number of monthly orders placement in year 2010, 2011, 2012
+--Method 1
+SELECT CONCAT(YEAR(OrderDate), '-', MONTH(OrderDate)) as month_year,
+       COUNT(*) as numOrder
+FROM Orders o
+WHERE OrderDate >= '2010-01-01' AND OrderDate < '2013-01-01'
+GROUP BY CONCAT(YEAR(OrderDate), '-', MONTH(OrderDate))
+
+SELECT YEAR(OrderDate) as Year_ , DATENAME(MONTH,OrderDate) as month_,
+       COUNT(*) as numOrder
+FROM Orders o
+WHERE OrderDate >= '2010-01-01' AND OrderDate < '2013-01-01'
+GROUP BY YEAR(OrderDate),DATENAME(MONTH,OrderDate)
+
+-- Method 2
+SELECT 
+    DATENAME(MONTH, OrderDate) AS Month_,
+    SUM(CASE WHEN YEAR(OrderDate) = 2010 THEN 1 ELSE 0 END) AS Year_2010,
+    SUM(CASE WHEN YEAR(OrderDate) = 2011 THEN 1 ELSE 0 END) AS Year_2011,
+    SUM(CASE WHEN YEAR(OrderDate) = 2012 THEN 1 ELSE 0 END) AS Year_2012
+FROM 
+    Orders
+WHERE 
+    OrderDate >= '2010-01-01' AND OrderDate < '2013-01-01'
+GROUP BY 
+    DATENAME(MONTH, OrderDate);
+
+--Has the proportion of bills by day of the week changed over the years? 
+SELECT YEAR(BillDate) as theyear, 
+AVG(CASE WHEN dow = 'Monday' THEN 1.0 ELSE 0 END) as Monday, 
+AVG(CASE WHEN dow = 'Tuesday' THEN 1.0 ELSE 0 END) as Tuesday, 
+AVG(CASE WHEN dow = 'Wednesday' THEN 1.0 ELSE 0 END) as Wednesday,
+AVG(CASE WHEN dow = 'Thursday' THEN 1.0 ELSE 0 END) as Thursday, AVG(CASE WHEN dow = 'Friday' THEN 1.0 ELSE 0 END) as Friday,
+AVG(CASE WHEN dow = 'Saturday' THEN 1.0 ELSE 0 END) as Saturday, 
+AVG(CASE WHEN dow = 'Sunday' THEN 1.0 ELSE 0 END) as Sunday
+FROM (SELECT ol.*, DATENAME(dw, BillDate) as dow FROM OrderLines ol) ol 
+GROUP BY YEAR(BillDate) 
+ORDER BY theyear
+
+
+-- What is the delay between the order date and the shipment initation date?
+
+SELECT  OrderId,  OrderDate,  EarliestShipmentDate,
+    DATEDIFF(day, [OrderDate], EarliestShipmentDate) AS delay_in_days
+FROM (
+    SELECT    o.OrderId,  o.OrderDate,  s.ShipDate AS EarliestShipmentDate,
+        ROW_NUMBER() OVER (PARTITION BY o.OrderId ORDER BY s.ShipDate) AS rn
+    FROM    Orders o
+    JOIN   OrderLines s ON o.OrderId = s.OrderId
+      ) AS Sub
+   WHERE   rn = 1;
+
+Week_10_2 Date time Fun recap
+
+
+-- Date Functions 
+
+-- CURRENT_TIMESTAMP ,GETDATE() returns a DATETIME data type 
+SELECT CURRENT_TIMESTAMP;
+SELECT GETDATE();
+
+-- SYSDATETIME() returns a DATETIME2 data type with a full 7 digits of precision. 
+SELECT SYSDATETIME() 
+
+-- CAST
+SELECT 
+   CAST(GETDATE() AS DATE) AS CD_GETDATE, -- Extract only date
+   CAST(GETDATE() AS TIME) AS CT_GETDATE; -- Extract onlt time
+   
+ SELECT SYSDATETIME() AS CDT_SDT,
+       CAST(SYSDATETIME() AS DATE) AS CD_SDT, -- Extract only date
+   CAST(SYSDATETIME() AS TIME) AS CT_SDT; -- Extract onlt time
+
+SELECT SYSDATETIME() Datetime2_type, CAST( SYSDATETIME() AS datetime) AS Datetime_type;
+
+SELECT CAST(2013-02-05 AS datetime);
+SELECT CAST(2013/02/05 AS datetime);
+
+--DatePart & DateName
+
+SELECT YEAR(GETDATE()) AS Year,
+       MONTH(GETDATE()) AS Month,
+       DAY(GETDATE()) AS Day;
+
+SELECT DATEPART(year, GETDATE()) AS Year,
+       DATEPART(month, GETDATE()) AS Month,
+       DATEPART(day, GETDATE()) AS Day;
+
+SELECT DATENAME(year, GETDATE()) AS Year,
+       DATENAME(month, GETDATE()) AS Month,
+       DATENAME(day, GETDATE()) AS Day;
+
+--Datediff
+
+SELECT DATEDIFF(day, '2023-01-04', GETDATE());
+SELECT DATEDIFF(month, '2023-01-04', GETDATE());
+SELECT DATEDIFF(year, '2023-01-04', GETDATE());
+
+--Dateadd
+
+SELECT DATEADD(day, 2, GETDATE());
+SELECT DATEADD(month, 2, GETDATE());
+SELECT DATEADD(year, -2, GETDATE());
+
+
+select date from Calendar;
+
+SELECT OrderDate, 
+    YEAR(OrderDate)* 10000 + MONTH(OrderDate) * 100 + DAY(OrderDate) as DATE_INT
+    FROM Orders
+
+Week_12
+
+
+--Stop Flag
+SELECT StopType, COUNT(*) as n, MIN(SubscriberId), MAX(SubscriberId)
+FROM Subscribers
+GROUP BY StopType
+ORDER BY StopType
+
+-- Active customer 
+SELECT SUM((CASE WHEN StopType IS NOT NULL THEN 0 ELSE 1 END)) as active, SUM((CASE WHEN StopType IS NOT NULL THEN 1 ELSE 0 END)) as Inactive​
+FROM Subscribers
+
+-- Max Start Date -STOP date for customer active
+SELECT MAX(StartDate) from Subscribers
+
+-- Tenure
+SELECT SubscriberId,Market,Rateplan,StartDate,StopDate,
+    DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END)) as tenure , Tenure
+    FROM Subscribers
+    WHERE StartDate is not null
+    ORDER BY DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END))
+
+SELECT 
+    DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END)) as tenure , Count(*) as customer_count
+    FROM Subscribers
+    GROUP BY DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END));
+
+--Running total of customer 
+SELECT 
+    DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END)) as tenure,
+    Count(*) as customer_count,
+    SUM(COUNT(*)) OVER (ORDER BY DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END))) as running_total
+FROM Subscribers
+WHERE StartDate is not null and tenure >=0
+GROUP BY DATEDIFF(day, StartDate, (CASE WHEN StopType IS NULL THEN '2006-12-28' ELSE StopDate END));
+
+
+-- year wise nalysis
+SELECT  theyear, SUM(isstart) as starts, SUM(isstop) as stops
+FROM ((SELECT YEAR(StartDate) as theyear, 1 as isstart, 0 as isstop
+ FROM Subscribers s)
+ UNION ALL
+ (SELECT YEAR(StopDate), 0 as isstart, 1 as isstop
+ FROM Subscribers s)
+ ) s
+GROUP BY theyear
+ORDER BY theyear
+
+--Tenure 100 at risk  Left termination ('2004-01-01')
+SELECT 100 as tenure, COUNT(*) as popatrisk,
+     SUM(CASE WHEN Tenure = 100 AND StopType IS NOT NULL
+    THEN 1 ELSE 0 END) as succumbtorisk,
+    AVG(CASE WHEN Tenure = 100 AND StopTYpe IS NOT NULL
+    THEN 1.0 ELSE 0 END) as h_100
+    FROM Subscribers
+    WHERE StartDate >= '2004-01-01' AND Tenure >= 100 
+
+--Survival at tenure t is the number of customers who are active at tenure t divided by the population at risk at tenure t
+SELECT 100 as tenure, COUNT(*) as popatrisk,
+ SUM(CASE WHEN Tenure < 100 AND StopType IS NOT NULL --  ( Survival count: popatrisk - succumbtorisk)
+ THEN 1 ELSE 0 END) as succumbtorisk,
+ AVG(CASE WHEN tenure >= 100 OR StopType IS NULL
+ THEN 1.0 ELSE 0 END) as s_100
+FROM Subscribers
+WHERE StartDate >= '2004-01-01' AND Tenure >= 0 AND
+ StartDate <= DATEADD(day, -100, '2006-12-28')
+
+
+-- Time versus Tenure
+SELECT TOP (10) *
+  FROM Subscribers
+  WHERE StartDate IS NOT NULL AND StopDate IS NOT NULL
+  ORDER BY SubscriberId
+
+-- Calculating Survival for All Tenures
+SELECT Tenure, COUNT(*) as popt,
+ SUM(CASE WHEN StopType IS NOT NULL THEN 1 ELSE 0 END) as stopt
+FROM Subscribers
+WHERE StartDate >= '2004-01-01' AND Tenure >= 0
+GROUP BY Tenure
+ORDER BY Tenure
+
+-- Retention:  Of customers who started xxx days ago, how many are still active? 
+SELECT DATEDIFF(day, StartDate, '2006-12-28') as daysago,
+ COUNT(*) as numstarts,
+SUM(CASE WHEN StopType IS NULL THEN 1 ELSE 0 END) as numactives,
+ AVG(CASE WHEN StopType IS NULL THEN 1.0 ELSE 0 END) as retention
+FROM Subscribers s
+WHERE StartDate >= '2004-01-01' AND Tenure >= 0
+GROUP BY DATEDIFF(day, StartDate, '2006-12-28')
+ORDER BY daysago
+
+  
+
+
+Week_13 RFM Demo
+
+--RFM - Demo
+
+SELECT Max(last_order) FROM rfm; -- Max last_order - earliest date
+
+
+--Identify R,F,M from given data
+SELECT CustomerID, DATEDIFF(day,last_order,'2023-01-07' )  as r,                            
+                   qtt_order as f,                            
+                    total_spent as m                            
+FROM rfm
+
+
+--RFM Value Calculation 
+
+SELECT CustomerID, (CASE WHEN r <=  119 THEN 1 WHEN r <= 183 THEN 2                            
+                   WHEN r <= 250 THEN 3 WHEN r <= 304 THEN 4                            
+                   ELSE 5 END) as recbin,                            
+             (CASE WHEN f <= 20 THEN 1 WHEN f <= 41 THEN 2                            
+                   WHEN f <= 72 THEN 3 WHEN f <= 147 THEN 4                            
+                   ELSE 5 END) as freqbin,                            
+             (CASE WHEN m >= 348813 THEN 1 WHEN m >= 181569 THEN 2                            
+                   WHEN m >= 105961 THEN 3 WHEN m >= 50013 THEN 4                            
+                   ELSE 5 END) as monbin                            
+      FROM (SELECT CustomerID, 
+                   DATEDIFF(day,last_order,'2023-01-07' )  as r,                            
+                   qtt_order as f,                            
+                   total_spent as m                            
+            FROM rfm) a 
+
+-- RFM Score Calculation 
+
+Select   recbin * 100 + freqbin * 10 + monbin as rfm, count(*) as numcusts from
+(SELECT (CASE WHEN r <=  119 THEN 1 WHEN r <= 183 THEN 2                            
+                   WHEN r <= 250 THEN 3 WHEN r <= 304 THEN 4                            
+                   ELSE 5 END) as recbin,                            
+             (CASE WHEN f <= 20 THEN 1 WHEN f <= 41 THEN 2                            
+                   WHEN f <= 72 THEN 3 WHEN f <= 147 THEN 4                            
+                   ELSE 5 END) as freqbin,                            
+             (CASE WHEN m >= 348813 THEN 1 WHEN m >= 181569 THEN 2                            
+                   WHEN m >= 105961 THEN 3 WHEN m >= 50013 THEN 4                            
+                   ELSE 5 END) as monbin                            
+      FROM (SELECT CustomerID, 
+                   DATEDIFF(day,last_order,'2023-01-07' )  as r,                            
+                   qtt_order as f,                            
+                   total_spent as m                            
+            FROM rfm) a ) b                            
+GROUP BY recbin * 100 + freqbin * 10 + monbin                            
+ORDER BY rfm 
+
+
+
+
+
+
+Week_13_2
+
+
+--Calculate counts of orders, customers, and households
+SELECT COUNT(*) as numorders, COUNT(DISTINCT c.CustomerId) as numcusts,
+COUNT(DISTINCT c.HouseholdId) as numhh
+FROM Orders o LEFT OUTER JOIN
+Customers c
+ON o.CustomerId = c.CustomerId
+
+
+-- How Many Customers are in a Household?
+SELECT numinhousehold, COUNT(*) as numhh
+FROM (SELECT HouseholdId, COUNT(*) as numinhousehold
+FROM Customers c
+GROUP BY HouseholdId) h
+GROUP BY numinhousehold
+ORDER BY numinhousehold;
+
+-- Average Size of households ( number of customer per hh)
+
+SELECT COUNT(*) * 1.0 / COUNT(DISTINCT HouseholdId)
+FROM Customers c
+
+-- How Many Genders in a Household?
+SELECT Gender, COUNT(*) as numcusts, MIN(CustomerId) as, MAX(CustomerId)
+FROM Customers
+GROUP BY Gender
+ORDER BY numcusts DESC
+
+-- Understanding Genders in a Household - alternative method
+SELECT numcustomers, COUNT(*) as numhh,
+SUM(CASE WHEN numgenders = 1 THEN 1 ELSE 0 END) as gen1,
+SUM(CASE WHEN numgenders = 2 THEN 1 ELSE 0 END) as gen2,
+SUM(CASE WHEN numgenders = 3 THEN 1 ELSE 0 END) as gen3
+FROM
+(SELECT HouseholdId, COUNT(*) as numcustomers,
+COUNT(DISTINCT Gender) as numgenders
+FROM Customers c
+GROUP BY HouseholdId) hh
+GROUP BY numcustomers
+ORDER BY numcustomers
+
+select * from Customers;
+
+-- Investigate the FirstName Instead of the Count
+SELECT HouseholdId, MIN(Firstname) as MIN_FN, MAX(Firstname) as Max_FN
+FROM Customers c
+GROUP BY HouseholdId
+HAVING MIN(Firstname) <> MAX(Firstname) AND MIN(Gender) = MAX(Gender)
+ORDER BY MIN_FN DESC;
+
+
+Week_13_3
+
+
+USE SQLBook
+
+-- create table CustomerSegmentation
+CREATE TABLE rfm (
+    CustomerID nvarchar(50) PRIMARY KEY,
+    qtt_order INT,
+    total_spent numeric(18, 0),
+    last_order date
+
+);
+
+--import data from csv
+
+
+BULK INSERT rfm
+FROM 'C:\SQL2022\data\RFM_Customer_Segmentation.csv' --Change this location as  appropriate for you
+WITH
+(
+    FIRSTROW = 2,
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '\n'
+
+)
+GO
+
